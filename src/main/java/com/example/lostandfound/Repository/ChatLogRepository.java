@@ -7,5 +7,5 @@ import java.util.List;
 
 public interface ChatLogRepository extends JpaRepository <ChatLog, Long> {
 
-    List<ChatLog> findByUserID(Long userID);
+    List<ChatLog> findByChatId(Long chatId);
 }
