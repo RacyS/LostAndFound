@@ -25,17 +25,14 @@ public class UserController {
         User loggedInUser = authService.authenticate(loginRequest.getEmail(), loginRequest.getPassword());
 
         if (loggedInUser != null) {
-
-            String roleName = (loggedInUser.getRole() == 1) ? "ADMIN" : "USER";
+            String roleName = loggedInUser.getRole().equals("STAFF") ? "STAFF" : "STUDENT";
 
             Map<String, Object> response = new HashMap<>();
-
             response.put("message", "Login successful");
             response.put("role", roleName);
             response.put("student_id", loggedInUser.getStudentID());
             response.put("userId", loggedInUser.getUserID());
             return new ResponseEntity<>(response, HttpStatus.OK);
-
         } else {
             // 4. ล็อกอินไม่ผ่าน
             return ResponseEntity.status(401).body(Map.of(

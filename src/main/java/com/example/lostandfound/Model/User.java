@@ -11,24 +11,20 @@ public class User {
     @Column(name = "User_ID")
     Long userID;
 
+    @Column(name = "User_Name")
+    String userName;
+
     @Column(name = "User_Email")
     String userEmail;
 
     @Column(name = "User_Password")
     String userPassword;
 
-    @Column(name = "User_Name")
-    String userName;
-
     @Column(name = "Student_ID")
     String studentID;
     @Column(name = "Staff_ID")
     String staffID;
-    int role;
-
-    public int getRole() {
-        return role;
-    }
+    String role;
 
     public Long getUserID() {
         return userID;
@@ -46,7 +42,11 @@ public class User {
         this.staffID = staffID;
     }
 
-    public void setRole(int role) {
+    public String getRole() {
+        return role;
+    }
+
+    public void setRole(String role) {
         this.role = role;
     }
 

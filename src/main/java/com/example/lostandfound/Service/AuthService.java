@@ -13,14 +13,20 @@ public class AuthService {
     private UserRepository userRepository;
 
     // เปลี่ยนมาคืนค่าเป็น Object User ทั้งก้อน
-    public User authenticate(String email, String password){
+    public User authenticate(String email, String password) {
         Optional<User> userOpt = userRepository.findByUserEmail(email);
+        System.out.println("หา email: " + email);
+        System.out.println("พบ user: " + userOpt.isPresent());
 
-        // เช็คว่ามี User นี้ไหม และ รหัสผ่านตรงไหม
-        if (userOpt.isPresent() && userOpt.get().getUserPassword().equals(password)) {
-            return userOpt.get(); // ส่งข้อมูล User คนนั้น
+        if (userOpt.isPresent()) {
+            System.out.println("password ใน DB: " + userOpt.get().getUserPassword());
+            System.out.println("password ที่ส่งมา: " + password);
+            System.out.println("ตรงกันไหม: " + userOpt.get().getUserPassword().equals(password));
+
+            if (userOpt.get().getUserPassword().equals(password)) {
+                return userOpt.get();
+            }
         }
-
         return null;
     }
 }
