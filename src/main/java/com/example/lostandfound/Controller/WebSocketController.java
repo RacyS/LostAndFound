@@ -1,10 +1,9 @@
 package com.example.lostandfound.Controller;
 
 import com.example.lostandfound.Model.*;
-import com.example.lostandfound.Repository.ChatMessageLogRepository;
-import com.example.lostandfound.Repository.ChatRepository;
-import com.example.lostandfound.Repository.ItemRepository;
+import com.example.lostandfound.Repository.*;
 import com.example.lostandfound.Service.WebSocketEventListener;
+import com.google.gson.Gson;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -36,23 +35,11 @@ public class WebSocketController {
     private ChatMessageLogRepository chatMessageLogRepository;
     @Autowired
     private ItemRepository itemRepository;
+    @Autowired
+    private UserRepository userRepository;
 
     public WebSocketController(ChatClient.Builder builder, SimpMessagingTemplate simpMessagingTemplate) {
-        this.chatClient = builder
-                .defaultSystem("""
-                            คุณคือเจ้าหน้าที่รับแจ้งและตรวจสอบของหาย (Lost & Found Officer)
-                            ของที่เจอ
-                            1.Samsung s25 ultra สีเขียว มีพวงกุญแจโดเรม่อน ภาพหน้าจอ เป็นโดเรม่อน
-                        [กฎเหล็กด้านความปลอดภัย (Strict Rules) - ต้องปฏิบัติตามอย่างเคร่งครัด]
-                        1. ห้าม! เปิดเผยรายละเอียดของสิ่งของใน [ข้อมูลสิ่งของที่พบแล้ว] (เช่น สี, ขนาด, สติ๊กเกอร์, สถานที่พบ) ให้ผู้ใช้รับรู้ก่อนเด็ดขาด
-                        2. หน้าที่ของคุณคือให้ "ผู้ใช้เป็นคนบอกรายละเอียด" แล้วคุณมีหน้าที่แค่เช็คว่า "ตรง" หรือ "ไม่ตรง"
-                        3. หากผู้ใช้บอกข้อมูลมาบางส่วน ให้ถามเจาะจงในส่วนที่ขาด เช่น "รบกวนระบุสี และจุดสังเกตพิเศษของกระเป๋าด้วยครับ" (ห้ามใบ้ว่ามีสติ๊กเกอร์)
-                        4. หากผู้ใช้บอกข้อมูลผิด (เช่น บอกว่าสีแดง แต่ในระบบคือสีเงิน) ให้ตอบอย่างสุภาพว่า "ข้อมูลยังไม่ตรงกับสิ่งของที่ระบบเราพบครับ รบกวนยืนยันลักษณะหรือจุดสังเกตอื่นๆ อีกครั้ง" (ห้ามบอกเด็ดขาดว่าเราพบสีอะไร)
-                        
-                        รูปแบบคำตอบ:
-                        -ตอบสั้น กระชับ สุภาพ
-                        - ห้ามใช้เครื่องหมาย Markdown เช่น ** ในการเน้นคำ
-                        """).build();
+        this.chatClient = builder.build(); //
         this.simpMessagingTemplate = simpMessagingTemplate;
     }
 
@@ -70,15 +57,11 @@ public class WebSocketController {
         String sessionId = WebSocketEventListener.userSessionMap.get(senderId);
 
         simpMessagingTemplate.convertAndSend("/topic/admin-dashboard", message);
-
+        System.out.println("userId ที่รับมา: " + message.getUserId());
         System.out.println("itemId ที่รับมา: " + message.getItemId());
 
         Optional<Chat> chatOpt = chatRepository.findByStudentFkAndItemId(userId, itemId);
-        if (chatOpt.isPresent() && chatOpt.get().getChatStatus().equals("STAFF_ACTIVE")) {
-            // Admin รับแล้ว ไม่ทำอะไร
-            System.out.println("chatId จาก DB: " + chatOpt.get().getChatId());
-            return;
-        }
+
         // หา Chat Session ไว้ตอบกลับ
         Chat chat = chatOpt.orElseGet(() -> {
             Chat newChat = new Chat();
@@ -89,62 +72,97 @@ public class WebSocketController {
             return chatRepository.save(newChat);
         });
 
+        // ดึงประวัติแชท
+        Long chatId = chat.getChatId();
+        List<ChatMessageLog> history = chatMessageLogRepository.findByChatId(chatId);
+        List<Message> messages = history.stream()
+                .map(log -> log.getUserId() == null
+                        ? new AssistantMessage(log.getMessage())
+                        : new UserMessage(log.getMessage()))
+                .collect(Collectors.toList());
+
+        String itemDetail = itemRepository.findById(itemId)
+                .map(Item::getItemDetail) // ← ดึงเฉพาะ field detail
+                .orElse("ไม่พบข้อมูลสิ่งของ");
+        System.out.println("detail: " + itemDetail);
+
+
+        String cleanContent = userContent.startsWith("#")
+                ? userContent.replaceFirst("#\\S+\\s*", "").trim()
+                : userContent;
+
+        if (cleanContent.isEmpty()) {
+            cleanContent = "สวัสดี";
+        }
+
+
+        // บันทึก log User
+        Timestamp currentTime = new Timestamp(System.currentTimeMillis());
+        ChatMessageLog userLog = new ChatMessageLog();
+        userLog.setMessage(userContent);
+        userLog.setCreateAt(currentTime);
+        userLog.setUserId(userId);
+        userLog.setChatId(chatId);// userId ของ User
+        System.out.println("chatId ก่อน save userLog: " + chatId);
+        System.out.println("userLog chatId: " + userLog.getChatId()); //
+        System.out.println("userLog message: " + userLog.getMessage()); //
+        chatMessageLogRepository.save(userLog);
         System.out.println("chatId ที่ได้: " + chat.getChatId());
+
+        if (chat.getChatStatus().equals("STAFF_ACTIVE")) {
+            return;
+        }
         if (sessionId != null) {
             // AI ตอบ
-            Long chatId = chat.getChatId();
-
-            // ดึงประวัติแชท
-            List<ChatMessageLog> history = chatMessageLogRepository.findByChatId(chatId);
-            System.out.println("history size: " + history.size());
-            List<Message> messages = history.stream()
-                    .map(log -> log.getUserId()==null
-                            ? new AssistantMessage(log.getMessage())
-                            : new UserMessage(log.getMessage()))
-                    .collect(Collectors.toList());
-            System.out.println("messages size: " + messages.size());
-
-            String itemDetail = itemRepository.findById(itemId)
-                    .map(Item::getItemDetail) // ← ดึงเฉพาะ field detail
-                    .orElse("ไม่พบข้อมูลสิ่งของ");
-            System.out.println("detail: " + itemDetail);
-
-
-            String cleanContent = userContent.startsWith("#")
-                    ? userContent.replaceFirst("#\\S+\\s*", "").trim()
-                    : userContent;
             messages.add(new UserMessage(cleanContent));
+            System.out.println("cleanContent: " + cleanContent);
+
+            String systemPrompt = """
+                    คุณคือเจ้าหน้าที่รับแจ้งและตรวจสอบของหาย (Lost & Found Officer)
+                    
+                    [ข้อมูลสิ่งของที่พบในระบบ - ห้ามเปิดเผยให้ผู้ใช้รู้]
+                    """ + itemDetail + """
+                    
+                    [กฎเหล็กด้านความปลอดภัย]
+                    1. ห้าม! เปิดเผยรายละเอียดของสิ่งของ (สี, ขนาด, สติ๊กเกอร์, สถานที่พบ)
+                    2. หน้าที่คือให้ผู้ใช้บอกรายละเอียดเอง แล้วเช็คว่า "ตรง" หรือ "ไม่ตรง"
+                    3. หากบอกข้อมูลมาบางส่วน ให้ถามเจาะจงในส่วนที่ขาด
+                    4. หากข้อมูลผิด ให้ตอบสุภาพว่าไม่ตรง ห้ามบอกว่าเราพบสีอะไร
+                    5. หากข้อมูลครบถูกต้อง ให้มารับที่สำนักงานของหาย
+                    6. เมื่อ ข้อมูลครบถ้วน ให้เริ่มต้นข้อความด้วย ข้อมูลถูกต้องครบถ้วนครับและบอกว่า รอแอดมินมายืนยัน
+                    รูปแบบคำตอบ: ตอบสั้น กระชับ สุภาพ ห้ามใช้ Markdown
+                    """;
 
             String AiResponse = chatClient.prompt()
-                    .messages(messages).call().content();
+                    .system(systemPrompt).messages(messages).call().content();
             ChatMessage replyMessage = new ChatMessage();
             replyMessage.setSenderId(senderId);
             replyMessage.setContent(AiResponse);
             replyMessage.setRole("ai");
 
+            Boolean verified = false;
+            if (AiResponse.contains("ข้อมูลถูกต้องครบถ้วนครับ")){
+                verified = true;
+                ChatMessage notifyMessage = new ChatMessage();
+                notifyMessage.setSenderId(senderId);
+                notifyMessage.setContent("");
+                notifyMessage.setRole("notiverifiedfy");
+                simpMessagingTemplate.convertAndSend("/topic/admin-dashboard", notifyMessage);
+                System.out.println(new Gson().toJson(notifyMessage));
+            }
+
             SimpMessageHeaderAccessor headerAccessor =
                     SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
             headerAccessor.setSessionId(sessionId);
-            headerAccessor.setLeaveMutable(true);
+            headerAccessor.setLeaveMutable(true);//ให้ Spring แก้ไข header ได้ก่อนส่ง
 
             simpMessagingTemplate.convertAndSendToUser(
                     sessionId, "/queue/reply", replyMessage,
                     headerAccessor.getMessageHeaders()
             );
+            System.out.println("replyMessage: " + replyMessage);
             simpMessagingTemplate.convertAndSend("/topic/admin-dashboard", replyMessage);
 
-            System.out.println("chatId ก่อน save userLog: " + chatId);
-            // บันทึก log User
-            Timestamp currentTime = new Timestamp(System.currentTimeMillis());
-            ChatMessageLog userLog = new ChatMessageLog();
-            userLog.setMessage(userContent);
-            userLog.setCreateAt(currentTime);
-            userLog.setUserId(userId);
-            userLog.setChatId(chatId);// userId ของ User
-
-            System.out.println("userLog chatId: " + userLog.getChatId()); //
-            System.out.println("userLog message: " + userLog.getMessage()); //
-            chatMessageLogRepository.save(userLog);
 
             // บันทึก log AI
             ChatMessageLog aiLog = new ChatMessageLog();
@@ -153,6 +171,42 @@ public class WebSocketController {
             aiLog.setUserId(null);
             aiLog.setChatId(chatId);
             chatMessageLogRepository.save(aiLog);
+        }
+    }
+    @MessageMapping("/admin.letOver")
+    public void adminletOver(@Payload ChatMessage message) {
+        String targetUserId = message.getSenderId();
+
+        simpMessagingTemplate.convertAndSend("/topic/admin-dashboard", message);
+
+        String sessionId = WebSocketEventListener.userSessionMap.get(targetUserId);
+        System.out.println("targetUserId: " + targetUserId + " sessionId: " + sessionId); // log
+
+        // เช็คก่อนส่ง
+        if (sessionId == null) {
+            System.out.println("ไม่พบ sessionId ของ: " + targetUserId);
+            return;
+        }
+
+        SimpMessageHeaderAccessor headerAccessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
+        headerAccessor.setSessionId(sessionId);
+        headerAccessor.setLeaveMutable(true);
+
+        simpMessagingTemplate.convertAndSendToUser(
+                sessionId, "/queue/reply", message,
+                headerAccessor.getMessageHeaders()
+        );
+
+        // อัพเดต BOT_ACTIVE ใน Chat
+        String userIdStr = WebSocketEventListener.userIdMap.get(targetUserId);// เอา studentId ไปหา userId จริงใน Map
+        Long userUserId = userIdStr != null ? Long.parseLong(userIdStr) : null;// ถ้าหาเจอ → แปลงเป็น Long  ถ้าไม่เจอ → null
+
+        if (userUserId != null) {
+            chatRepository.findByStudentFkAndItemId(userUserId, Long.parseLong(message.getItemId()))
+                    .ifPresent(chat -> {
+                        chat.setChatStatus("BOT_ACTIVE");
+                        chatRepository.save(chat);
+                    });
         }
     }
 
@@ -181,9 +235,9 @@ public class WebSocketController {
         );
 
         // อัพเดต Staff_FK ใน Chat
-        String userIdStr = WebSocketEventListener.userIdMap.get(targetUserId);
-        Long adminId = Long.parseLong(message.getUserId());
-        Long userUserId = userIdStr != null ? Long.parseLong(userIdStr) : null;
+        String userIdStr = WebSocketEventListener.userIdMap.get(targetUserId);// เอา studentId ไปหา userId จริงใน Map
+        Long adminId = Long.parseLong(message.getUserId());// userId ของ Admin ที่กดรับเคส
+        Long userUserId = userIdStr != null ? Long.parseLong(userIdStr) : null;// ถ้าหาเจอ → แปลงเป็น Long  ถ้าไม่เจอ → null
 
         if (userUserId != null) {
             chatRepository.findByStudentFkAndItemId(userUserId, Long.parseLong(message.getItemId()))
@@ -194,13 +248,34 @@ public class WebSocketController {
                     });
         }
     }
+    @CrossOrigin(origins = "http://localhost:3000")
+    @ResponseBody
+    @GetMapping("/chat/status/all")
+    public Map<String, String> getAllChatStatus() {
+        List<Chat> allChats = chatRepository.findAll();
+        Map<String, String> result = new HashMap<>();
+
+        for (Chat chat : allChats) {
+            String studentId = userRepository.findById(chat.getStudentFk())
+                    .map(u -> u.getStudentId())
+                    .orElse(chat.getStudentFk().toString());
+
+            // ถ้า STAFF_ACTIVE ให้เก็บไว้
+            if (chat.getChatStatus().equals("STAFF_ACTIVE")) {
+                result.put(studentId, "STAFF_ACTIVE");
+            }
+        }
+        return result;
+    }
 
     @MessageMapping("/admin.chat.toUser")
     public void adminChatToUser(@Payload ChatMessage message) {
         String targetUserId = message.getSenderId();
         String sessionId = WebSocketEventListener.userSessionMap.get(targetUserId);
-
+        System.out.println("itemId ที่รับมา: " + message.getItemId()); //
+        System.out.println("userId ที่รับมา: " + message.getUserId()); //
         String userIdStr = WebSocketEventListener.userIdMap.get(targetUserId);
+        System.out.println("userIdStr: " + userIdStr);
         if (userIdStr == null) return;
 
         Long userId = Long.parseLong(userIdStr);
@@ -228,21 +303,16 @@ public class WebSocketController {
                     chatMessageLogRepository.save(adminLog);
                 });
     }
+
     @CrossOrigin(origins = "http://localhost:3000")
     @ResponseBody
-    @GetMapping("/chat/history/user/{userId}/item/{itemId}")
-    public List<ChatMessageDto> getChatHistory(
-            @PathVariable Long userId,
-            @PathVariable Long itemId) {
-        System.out.println("หา history userId: " + userId + " itemId: " + itemId);
-        Optional<Chat> chat = chatRepository.findByStudentFkAndItemId(userId, itemId);
-        System.out.println("เจอ chat ไหม: " + chat.isPresent());
-        if (chat.isEmpty()) return List.of();
-        System.out.println("chatId: " + chat.get().getChatId());
-        List<ChatMessageDto> result = chatMessageLogRepository.findByChatIdWithRole(chat.get().getChatId());
-        System.out.println("จำนวน message: " + result.size());
-
-        return chatMessageLogRepository.findByChatIdWithRole(chat.get().getChatId());
+    @GetMapping("/chat/history/user/{userId}/all")
+    public List<ChatMessageDto> getAllChatHistoryByUser(@PathVariable Long userId) {
+        List<Chat> chats = chatRepository.findByStudentFk(userId);
+        return chats.stream()
+                .flatMap(c -> chatMessageLogRepository
+                        .findByChatIdWithRole(c.getChatId()).stream())
+                .collect(Collectors.toList());
     }
 
     @CrossOrigin(origins = "http://localhost:3000")
@@ -251,11 +321,21 @@ public class WebSocketController {
     public Map<String, List<ChatMessageDto>> getAllChatHistory() {
         List<Chat> allChats = chatRepository.findAll();
         Map<String, List<ChatMessageDto>> result = new HashMap<>();
+
         for (Chat chat : allChats) {
             List<ChatMessageDto> logs = chatMessageLogRepository
                     .findByChatIdWithRole(chat.getChatId());
-            String key = chat.getStudentFk().toString();
-            result.merge(key, logs, (a, b) -> { a.addAll(b); return a; });
+            System.out.println("chatId: " + chat.getChatId() + " itemId: " + chat.getItemId());
+            System.out.println("first log itemId: " + (logs.isEmpty() ? "ไม่มี" : logs.get(0).getItemId()));
+            // ดึง studentId จาก User table
+            String key = userRepository.findById(chat.getStudentFk())
+                    .map(u -> u.getStudentId()) // ← ใช้ studentId แทน userId
+                    .orElse(chat.getStudentFk().toString()); // fallback เป็น userId
+
+            result.merge(key, logs, (a, b) -> {
+                a.addAll(b);
+                return a;
+            });
         }
         return result;
     }

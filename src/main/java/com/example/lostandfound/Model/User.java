@@ -9,7 +9,7 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
 
     @Column(name = "User_ID")
-    Long userID;
+    Long userId;
 
     @Column(name = "User_Name")
     String userName;
@@ -21,25 +21,25 @@ public class User {
     String userPassword;
 
     @Column(name = "Student_ID")
-    String studentID;
+    String studentId;
     @Column(name = "Staff_ID")
-    String staffID;
+    String staffId;
     String role;
 
-    public Long getUserID() {
-        return userID;
+    public Long getUserId() {
+        return userId;
     }
 
-    public void setUserID(Long userID) {
-        this.userID = userID;
+    public void setUserId(Long userID) {
+        this.userId = userID;
     }
 
-    public String getStaffID() {
-        return staffID;
+    public String getStaffId() {
+        return staffId;
     }
 
-    public void setStaffID(String staffID) {
-        this.staffID = staffID;
+    public void setStaffId(String staffID) {
+        this.staffId = staffID;
     }
 
     public String getRole() {
@@ -74,12 +74,12 @@ public class User {
         this.userName = student_name;
     }
 
-    public String getStudentID() {
-        return studentID;
+    public String getStudentId() {
+        return studentId;
     }
 
-    public void setStudentID(String student_id) {
-        this.studentID = student_id;
+    public void setStudentId(String student_id) {
+        this.studentId = student_id;
     }
 
 }

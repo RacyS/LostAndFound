@@ -17,6 +17,7 @@ public class WebSocketEventListener {
     @EventListener
     public void handleSessionSubscribe(SessionSubscribeEvent event) {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
+        // wrap = ห่อ message ด้วย accessor เพื่อให้ดึง header ได้ง่าย
         String sessionId = accessor.getSessionId();
         String studentId = accessor.getFirstNativeHeader("studentId");
         String userId = accessor.getFirstNativeHeader("userId");

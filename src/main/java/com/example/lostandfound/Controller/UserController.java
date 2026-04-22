@@ -30,8 +30,8 @@ public class UserController {
             Map<String, Object> response = new HashMap<>();
             response.put("message", "Login successful");
             response.put("role", roleName);
-            response.put("student_id", loggedInUser.getStudentID());
-            response.put("userId", loggedInUser.getUserID());
+            response.put("student_id", loggedInUser.getStudentId());
+            response.put("userId", loggedInUser.getUserId());
             return new ResponseEntity<>(response, HttpStatus.OK);
         } else {
             // 4. ล็อกอินไม่ผ่าน

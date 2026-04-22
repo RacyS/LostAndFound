@@ -7,8 +7,8 @@ import jakarta.persistence.*;
 @Table(name = "item")
 public class Item {
     @Id
-    @Column(name = "Item_ID")
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "Item_ID")
     private Long itemId;
 
     @Column(name = "Item_Name")

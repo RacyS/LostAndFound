@@ -1,4 +1,4 @@
-package com.example.lostandfound.Model;
+package com.example.lostandfound.Repository;
 
 import java.sql.Timestamp;
 
@@ -9,4 +9,5 @@ public interface ChatMessageDto {
     Long getUserId();
     Long getChatId();
     String getRole();
+    Long getItemId();
 }
