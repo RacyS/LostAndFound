@@ -148,7 +148,12 @@ public class WebSocketController {
                 notifyMessage.setContent("");
                 notifyMessage.setRole("notiverifiedfy");
                 simpMessagingTemplate.convertAndSend("/topic/admin-dashboard", notifyMessage);
-                System.out.println(new Gson().toJson(notifyMessage));
+
+                itemRepository.findById(itemId).ifPresent(item -> {
+                    item.setItemStatus("UNDER_VERIFICATION");
+                    itemRepository.save(item);
+                    System.out.println("Updated itemId: " + itemId + " → UNDER_VERIFICATION");
+                });
             }
 
             SimpMessageHeaderAccessor headerAccessor =
