@@ -152,7 +152,6 @@ public class WebSocketController {
                 itemRepository.findById(itemId).ifPresent(item -> {
                     item.setItemStatus("UNDER_VERIFICATION");
                     itemRepository.save(item);
-                    System.out.println("Updated itemId: " + itemId + " → UNDER_VERIFICATION");
                 });
             }
 
