@@ -81,16 +81,35 @@ public class WebSocketController {
                         : new UserMessage(log.getMessage()))
                 .collect(Collectors.toList());
 
+        Item itemD = itemRepository.findById(itemId).orElse(null);
+        String ItemName = itemD != null ? itemD.getItemName() : "ไม่พบชื่อ";
+        String ItemStatus = itemD != null ? itemD.getItemStatus() : "UNKNOWN";
+        System.out.println("สถานะ: " + ItemStatus);
+        if ("CLAIM".equals(ItemStatus)) {
+            // ส่งข้อความแจ้ง User ทันที ไม่ต้องให้ AI ตอบ
+            ChatMessage claimMessage = new ChatMessage();
+            claimMessage.setSenderId(senderId);
+            claimMessage.setContent("ขออภัยครับ สิ่งของชิ้นนี้ถูกรับไปแล้ว ไม่สามารถดำเนินการต่อได้ สามารถมาติดต่อสอบถามเพิ่มเติมได้ที่ แผนก");
+            claimMessage.setRole(null);
+
+            SimpMessageHeaderAccessor headerAccessor =
+                    SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
+            headerAccessor.setSessionId(sessionId);
+            headerAccessor.setLeaveMutable(true);
+
+            simpMessagingTemplate.convertAndSendToUser(
+                    sessionId, "/queue/reply", claimMessage,
+                    headerAccessor.getMessageHeaders()
+            );
+            return; // ← หยุด ไม่ให้ AI ตอบ
+        }
         String itemDetail = itemRepository.findById(itemId)
                 .map(Item::getItemDetail) // ← ดึงเฉพาะ field detail
                 .orElse("ไม่พบข้อมูลสิ่งของ");
         System.out.println("detail: " + itemDetail);
-
-
         String cleanContent = userContent.startsWith("#")
                 ? userContent.replaceFirst("#\\S+\\s*", "").trim()
                 : userContent;
-
         if (cleanContent.isEmpty()) {
             cleanContent = "สวัสดี";
         }
@@ -121,7 +140,8 @@ public class WebSocketController {
                     คุณคือเจ้าหน้าที่รับแจ้งและตรวจสอบของหาย (Lost & Found Officer)
                     
                     [ข้อมูลสิ่งของที่พบในระบบ - ห้ามเปิดเผยให้ผู้ใช้รู้]
-                    """ + itemDetail + """
+                    """+ItemName + itemDetail + """
+                    
                     
                     [กฎเหล็กด้านความปลอดภัย]
                     1. ห้าม! เปิดเผยรายละเอียดของสิ่งของ (สี, ขนาด, สติ๊กเกอร์, สถานที่พบ)
@@ -142,17 +162,16 @@ public class WebSocketController {
 
             Boolean verified = false;
             if (AiResponse.contains("ข้อมูลถูกต้องครบถ้วนครับ")){
-                verified = true;
-                ChatMessage notifyMessage = new ChatMessage();
-                notifyMessage.setSenderId(senderId);
-                notifyMessage.setContent("");
-                notifyMessage.setRole("notiverifiedfy");
-                simpMessagingTemplate.convertAndSend("/topic/admin-dashboard", notifyMessage);
-
                 itemRepository.findById(itemId).ifPresent(item -> {
                     item.setItemStatus("UNDER_VERIFICATION");
                     itemRepository.save(item);
                 });
+                verified = true;
+                ChatMessage notifyMessage = new ChatMessage();
+                notifyMessage.setSenderId(senderId);
+                notifyMessage.setContent("✅ User ยืนยันตัวตนสำเร็จ");
+                notifyMessage.setRole("notiverifiedfy");
+                simpMessagingTemplate.convertAndSend("/topic/admin-dashboard", notifyMessage);
             }
 
             SimpMessageHeaderAccessor headerAccessor =
@@ -177,43 +196,27 @@ public class WebSocketController {
             chatMessageLogRepository.save(aiLog);
         }
     }
-    @MessageMapping("/admin.letOver")
-    public void adminletOver(@Payload ChatMessage message) {
-        String targetUserId = message.getSenderId();
+    @GetMapping("/chat/verified/all")
+    @CrossOrigin(origins = "http://localhost:3000")
+    @ResponseBody
+    public Set<String> getVerifiedChats() {
+        List<Chat> allChats = chatRepository.findAll();
+        Set<String> verified = new HashSet<>();
 
-        simpMessagingTemplate.convertAndSend("/topic/admin-dashboard", message);
-
-        String sessionId = WebSocketEventListener.userSessionMap.get(targetUserId);
-        System.out.println("targetUserId: " + targetUserId + " sessionId: " + sessionId); // log
-
-        // เช็คก่อนส่ง
-        if (sessionId == null) {
-            System.out.println("ไม่พบ sessionId ของ: " + targetUserId);
-            return;
-        }
-
-        SimpMessageHeaderAccessor headerAccessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
-        headerAccessor.setSessionId(sessionId);
-        headerAccessor.setLeaveMutable(true);
-
-        simpMessagingTemplate.convertAndSendToUser(
-                sessionId, "/queue/reply", message,
-                headerAccessor.getMessageHeaders()
-        );
-
-        // อัพเดต BOT_ACTIVE ใน Chat
-        String userIdStr = WebSocketEventListener.userIdMap.get(targetUserId);// เอา studentId ไปหา userId จริงใน Map
-        Long userUserId = userIdStr != null ? Long.parseLong(userIdStr) : null;// ถ้าหาเจอ → แปลงเป็น Long  ถ้าไม่เจอ → null
-
-        if (userUserId != null) {
-            chatRepository.findByStudentFkAndItemId(userUserId, Long.parseLong(message.getItemId()))
-                    .ifPresent(chat -> {
-                        chat.setChatStatus("BOT_ACTIVE");
-                        chatRepository.save(chat);
+        for (Chat chat : allChats) {
+            // เช็คจาก Item status แทน
+            itemRepository.findById(chat.getItemId())
+                    .ifPresent(item -> {
+                        if ("UNDER_VERIFICATION".equals(item.getItemStatus())) {
+                            String studentId = userRepository.findById(chat.getStudentFk())
+                                    .map(u -> u.getStudentId())
+                                    .orElse(chat.getStudentFk().toString());
+                            verified.add(studentId);
+                        }
                     });
         }
+        return verified;
     }
-
     @MessageMapping("/admin.takeOver")
     public void adminTakeOver(@Payload ChatMessage message) {
         String targetUserId = message.getSenderId();
@@ -252,6 +255,7 @@ public class WebSocketController {
                     });
         }
     }
+
     @CrossOrigin(origins = "http://localhost:3000")
     @ResponseBody
     @GetMapping("/chat/status/all")
@@ -306,6 +310,42 @@ public class WebSocketController {
                     adminLog.setUserId(adminId); // userId ของ Admin
                     chatMessageLogRepository.save(adminLog);
                 });
+    }
+    @MessageMapping("/admin.letOver")
+    public void adminletOver(@Payload ChatMessage message) {
+        String targetUserId = message.getSenderId();
+
+        simpMessagingTemplate.convertAndSend("/topic/admin-dashboard", message);
+
+        String sessionId = WebSocketEventListener.userSessionMap.get(targetUserId);
+        System.out.println("targetUserId: " + targetUserId + " sessionId: " + sessionId); // log
+
+        // เช็คก่อนส่ง
+        if (sessionId == null) {
+            System.out.println("ไม่พบ sessionId ของ: " + targetUserId);
+            return;
+        }
+
+        SimpMessageHeaderAccessor headerAccessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
+        headerAccessor.setSessionId(sessionId);
+        headerAccessor.setLeaveMutable(true);
+
+        simpMessagingTemplate.convertAndSendToUser(
+                sessionId, "/queue/reply", message,
+                headerAccessor.getMessageHeaders()
+        );
+
+        // อัพเดต BOT_ACTIVE ใน Chat
+        String userIdStr = WebSocketEventListener.userIdMap.get(targetUserId);// เอา studentId ไปหา userId จริงใน Map
+        Long userUserId = userIdStr != null ? Long.parseLong(userIdStr) : null;// ถ้าหาเจอ → แปลงเป็น Long  ถ้าไม่เจอ → null
+
+        if (userUserId != null) {
+            chatRepository.findByStudentFkAndItemId(userUserId, Long.parseLong(message.getItemId()))
+                    .ifPresent(chat -> {
+                        chat.setChatStatus("BOT_ACTIVE");
+                        chatRepository.save(chat);
+                    });
+        }
     }
 
     @CrossOrigin(origins = "http://localhost:3000")
