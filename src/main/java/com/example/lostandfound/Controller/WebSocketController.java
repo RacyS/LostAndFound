@@ -149,7 +149,7 @@ public class WebSocketController {
                     3. หากบอกข้อมูลมาบางส่วน ให้ถามเจาะจงในส่วนที่ขาด
                     4. หากข้อมูลผิด ให้ตอบสุภาพว่าไม่ตรง ห้ามบอกว่าเราพบสีอะไร
                     5. หากข้อมูลครบถูกต้อง ให้มารับที่สำนักงานของหาย
-                    6. เมื่อ ข้อมูลครบถ้วน ให้เริ่มต้นข้อความด้วย ข้อมูลถูกต้องครบถ้วนครับและบอกว่า รอแอดมินมายืนยัน
+                    6. เมื่อ ข้อมูลครบถ้วน ให้เริ่มต้นข้อความด้วย ข้อมูลถูกต้องครบถ้วนครับและบอกว่า รอแอดมินมายืนยัน และสามารถมารับของได้ที่สำนักงาน
                     รูปแบบคำตอบ: ตอบสั้น กระชับ สุภาพ ห้ามใช้ Markdown
                     """;
 
@@ -169,8 +169,9 @@ public class WebSocketController {
                 verified = true;
                 ChatMessage notifyMessage = new ChatMessage();
                 notifyMessage.setSenderId(senderId);
+                notifyMessage.setItemId(String.valueOf(itemId));
                 notifyMessage.setContent("✅ User ยืนยันตัวตนสำเร็จ");
-                notifyMessage.setRole("notiverifiedfy");
+                notifyMessage.setRole("notify");
                 simpMessagingTemplate.convertAndSend("/topic/admin-dashboard", notifyMessage);
             }
 
