@@ -14,13 +14,13 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
 
     Optional<Item> findItemByItemId(Long itemId);
 
-    // แก้ไข Query ให้ตรงกับชื่อตัวแปรใน Class Item
+    // แก้ไข Query ให้ค้นหาจาก ID ได้ด้วย
     @Query("SELECT i FROM Item i WHERE " +
             "LOWER(i.itemName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
-            "LOWER(i.itemDetail) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+            "LOWER(i.itemDetail) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+            "CAST(i.itemId AS string) LIKE CONCAT('%', :keyword, '%') " + // <--- เพิ่มบรรทัดนี้
             "ORDER BY i.itemId DESC")
     List<Item> searchByKeyword(@Param("keyword") String keyword);
 
-    // ดึงทั้งหมดเรียงตาม itemId จากมากไปน้อย (ของใหม่ขึ้นก่อน)
     List<Item> findAllByOrderByItemIdDesc();
 }
