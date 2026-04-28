@@ -82,10 +82,11 @@ public class WebSocketController {
                 .collect(Collectors.toList());
 
         Item itemD = itemRepository.findById(itemId).orElse(null);
-        String ItemName = itemD != null ? itemD.getItemName() : "ไม่พบชื่อ";
-        String ItemStatus = itemD != null ? itemD.getItemStatus() : "UNKNOWN";
-        System.out.println("สถานะ: " + ItemStatus);
-        if ("CLAIM".equals(ItemStatus)) {
+        String itemName = itemD.getItemName();
+        String itemStatus = itemD.getItemStatus();
+        String itemDetail = itemD.getItemDetail();
+        System.out.println("สถานะ: " + itemStatus);
+        if ("CLAIM".equals(itemStatus)) {
             // ส่งข้อความแจ้ง User ทันที ไม่ต้องให้ AI ตอบ
             ChatMessage claimMessage = new ChatMessage();
             claimMessage.setSenderId(senderId);
@@ -103,10 +104,6 @@ public class WebSocketController {
             );
             return; // ← หยุด ไม่ให้ AI ตอบ
         }
-        String itemDetail = itemRepository.findById(itemId)
-                .map(Item::getItemDetail) // ← ดึงเฉพาะ field detail
-                .orElse("ไม่พบข้อมูลสิ่งของ");
-        System.out.println("detail: " + itemDetail);
         String cleanContent = userContent.startsWith("#")
                 ? userContent.replaceFirst("#\\S+\\s*", "").trim()
                 : userContent;
@@ -133,26 +130,36 @@ public class WebSocketController {
         }
         if (sessionId != null) {
             // AI ตอบ
+            System.out.println("DEBUG >>> Item Object ID: " + System.identityHashCode(itemD));
+            System.out.println("DEBUG >>> Database Raw Detail: " + itemD.getItemDetail());
+
             messages.add(new UserMessage(cleanContent));
             System.out.println("cleanContent: " + cleanContent);
-
+            String itemContext = String.format("ชื่อสิ่งของ: %s\nรายละเอียดเชิงลึก: %s", itemName, itemDetail);
+            System.out.println("----------------------------------------------");
+            System.out.println("[AI Context Check]");
+            System.out.println("Item Info Sent to AI: " + itemContext);
+            System.out.println("----------------------------------------------");
             String systemPrompt = """
                     คุณคือเจ้าหน้าที่รับแจ้งและตรวจสอบของหาย (Lost & Found Officer)
                     
                     [ข้อมูลสิ่งของที่พบในระบบ - ห้ามเปิดเผยให้ผู้ใช้รู้]
-                    """+ItemName + itemDetail + """
+                    """+itemContext+ """
                     
                     
                     [กฎเหล็กด้านความปลอดภัย]
                     1. ห้าม! เปิดเผยรายละเอียดของสิ่งของ (สี, ขนาด, สติ๊กเกอร์, สถานที่พบ)
                     2. หน้าที่คือให้ผู้ใช้บอกรายละเอียดเอง แล้วเช็คว่า "ตรง" หรือ "ไม่ตรง"
                     3. หากบอกข้อมูลมาบางส่วน ให้ถามเจาะจงในส่วนที่ขาด
-                    4. หากข้อมูลผิด ให้ตอบสุภาพว่าไม่ตรง ห้ามบอกว่าเราพบสีอะไร
-                    5. หากข้อมูลครบถูกต้อง ให้มารับที่สำนักงานของหาย
-                    6. เมื่อ ข้อมูลครบถ้วน ให้เริ่มต้นข้อความด้วย ข้อมูลถูกต้องครบถ้วนครับและบอกว่า รอแอดมินมายืนยัน และสามารถมารับของได้ที่สำนักงาน
+                    4. หากข้อมูล "เกือบครบ" (เช่น ถูก 2 จาก 3 อย่าง):
+                    -ให้ถามเจาะจงจุดที่เหลือเพื่อให้มั่นใจจริงๆ
+                    5.หากผู้ใช้บอกข้อมูลมา "ถูกบางส่วน" (เช่น บอกแค่สี):
+                    -ให้ตอบรับว่าข้อมูลเบื้องต้นน่าสนใจ แต่ขอให้ระบุรายละเอียดเพิ่ม เช่น "วัสดุทำจากอะไร?" หรือ "มีตำหนิ/สัญลักษณ์พิเศษตรงไหนไหม?"
+                    6. หากข้อมูลครบถูกต้อง ให้มารับที่สำนักงานของหาย
+                    7. เมื่อ ข้อมูลครบถ้วน ให้เริ่มต้นข้อความด้วย ข้อมูลถูกต้องครบถ้วนครับและบอกว่า รอแอดมินมายืนยัน และสามารถมารับของได้ที่ฝ่ายวินัยนักศึกษา
                     รูปแบบคำตอบ: ตอบสั้น กระชับ สุภาพ ห้ามใช้ Markdown
                     """;
-
+            System.out.println("System Prompt Length: " + systemPrompt.length());
             String AiResponse = chatClient.prompt()
                     .system(systemPrompt).messages(messages).call().content();
             ChatMessage replyMessage = new ChatMessage();
@@ -316,6 +323,7 @@ public class WebSocketController {
     public void adminletOver(@Payload ChatMessage message) {
         String targetUserId = message.getSenderId();
 
+        message.setRole("admin");
         simpMessagingTemplate.convertAndSend("/topic/admin-dashboard", message);
 
         String sessionId = WebSocketEventListener.userSessionMap.get(targetUserId);
@@ -326,7 +334,7 @@ public class WebSocketController {
             System.out.println("ไม่พบ sessionId ของ: " + targetUserId);
             return;
         }
-
+        message.setRole(null);
         SimpMessageHeaderAccessor headerAccessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
         headerAccessor.setSessionId(sessionId);
         headerAccessor.setLeaveMutable(true);
@@ -345,43 +353,67 @@ public class WebSocketController {
                     .ifPresent(chat -> {
                         chat.setChatStatus("BOT_ACTIVE");
                         chatRepository.save(chat);
+                        System.out.println("ChatStatus เปลี่ยน"+chat.getChatStatus());
                     });
         }
+    }
+    @MessageMapping("/admin.verify")
+    public void adminVerify(@Payload ChatMessage message) {
+        String targetUserId = message.getSenderId();
+
+        itemRepository.findItemByItemId( Long.parseLong(message.getItemId()))
+                .ifPresent(item -> {
+                    item.setItemStatus("READY_TO_PICKUP");
+                    itemRepository.save(item);
+                });
+        String sessionId = WebSocketEventListener.userSessionMap.get(targetUserId);
+        SimpMessageHeaderAccessor headerAccessor = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
+        headerAccessor.setSessionId(sessionId);
+        headerAccessor.setLeaveMutable(true);
+
+        simpMessagingTemplate.convertAndSendToUser(
+                sessionId, "/queue/reply", message,
+                headerAccessor.getMessageHeaders());
     }
 
     @CrossOrigin(origins = "http://localhost:3000")
     @ResponseBody
     @GetMapping("/chat/history/user/{userId}/all")
     public List<ChatMessageDto> getAllChatHistoryByUser(@PathVariable Long userId) {
-        List<Chat> chats = chatRepository.findByStudentFk(userId);
-        return chats.stream()
+        List<Chat> chats = chatRepository.findByStudentFk(userId); // ดึง Chat ทุก session ของ User คนนี้จาก DB
+        return chats.stream()//เปิด stream เพื่อประมวลผลทีละ Chat
                 .flatMap(c -> chatMessageLogRepository
-                        .findByChatIdWithRole(c.getChatId()).stream())
-                .collect(Collectors.toList());
+                        .findByChatIdWithRole(c.getChatId()).stream())// flatMap = แปลง List<List<ChatMessageDto>> เป็น List<ChatMessageDto>
+                .collect(Collectors.toList());// รวบ stream กลับเป็น List แล้ว return
     }
 
     @CrossOrigin(origins = "http://localhost:3000")
     @ResponseBody
     @GetMapping("/chat/history/all")
     public Map<String, List<ChatMessageDto>> getAllChatHistory() {
-        List<Chat> allChats = chatRepository.findAll();
-        Map<String, List<ChatMessageDto>> result = new HashMap<>();
+        List<Chat> allChats = chatRepository.findAll(); // ดึง Chat ทั้งหมดใน DB มาเลย ทุก User ทุก Item
+        Map<String, List<ChatMessageDto>> result = new HashMap<>(); // สร้าง Map ว่างเปล่าไว้เก็บผลลัพธ์
 
-        for (Chat chat : allChats) {
+        for (Chat chat : allChats) { // วนทีละ Chat
             List<ChatMessageDto> logs = chatMessageLogRepository
-                    .findByChatIdWithRole(chat.getChatId());
+                    .findByChatIdWithRole(chat.getChatId()); // ดึงข้อความทั้งหมดของ Chat นี้ พร้อม role (user/ai/admin)
+
             System.out.println("chatId: " + chat.getChatId() + " itemId: " + chat.getItemId());
             System.out.println("first log itemId: " + (logs.isEmpty() ? "ไม่มี" : logs.get(0).getItemId()));
             // ดึง studentId จาก User table
-            String key = userRepository.findById(chat.getStudentFk())
+            String key = userRepository.findById(chat.getStudentFk())// หา User จาก studentFk ของ Chat
+                    // chat.getStudentFk() = userId ใน DB เช่น 3
                     .map(u -> u.getStudentId()) // ← ใช้ studentId แทน userId
                     .orElse(chat.getStudentFk().toString()); // fallback เป็น userId
 
             result.merge(key, logs, (a, b) -> {
+                // merge = ถ้า key นี้มีอยู่แล้วใน Map → รวม List
+                //  ถ้า key นี้ยังไม่มี → เพิ่มใหม่
                 a.addAll(b);
-                return a;
+                return a;// คืน List ที่รวมแล้ว
             });
         }
-        return result;
+        return result;    // คืน Map ที่มีทุก User
+
     }
 }

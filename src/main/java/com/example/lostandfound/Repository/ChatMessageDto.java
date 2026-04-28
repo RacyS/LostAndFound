@@ -10,4 +10,6 @@ public interface ChatMessageDto {
     Long getChatId();
     String getRole();
     Long getItemId();
+    String getStudentId();
+    Long getStudentDbId();
 }
